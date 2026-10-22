@@ -10,25 +10,75 @@ Let one strong AI **lead** (Claude Code) plan the work and hand the typing to ch
 
 ## How it works
 
-```
-        you
-         │
-   ┌─────▼─────┐  1. writes contracts (interfaces, types) and task prompts
-   │   LEAD    │  4. reviews every file, runs build + tests, fixes or re-delegates
-   │ (Claude)  │
-   └─────┬─────┘
-         │ MCP: delegate_task / delegate_parallel
-   ┌─────▼──────────────────────────────┐
-   │ ensemble-mcp                       │  builds prompt = shared rules + role prompt
-   │  • role → owned paths              │            + task + context files
-   │  • path policy (symlink-safe)      │  calls the model, parses file blocks,
-   │  • audit log                       │  writes only what the role owns
-   └─────┬───────┬───────┬──────────────┘
-         ▼       ▼       ▼
-     backend   web     tests      sub-agents, each confined to its own paths
+```mermaid
+flowchart TD
+    You(["You<br/>goal, hardware checks"]) --> Lead
+    Lead["<b>Lead</b> (Claude Code)<br/>writes contracts and task prompts<br/>reviews every file, runs build and tests"]
+    Lead -- "MCP tool call" --> Srv
+    subgraph Srv ["ensemble-mcp server"]
+        direction LR
+        P["Prompt builder"] --> G["Path policy<br/>owned paths only"] --> L[("Audit log")]
+    end
+    Srv -- "one call per role" --> Roles
+    subgraph Roles ["Role sub-agents, parallel, disjoint paths"]
+        direction LR
+        A["backend<br/>owns src/"]
+        B["web<br/>owns web/"]
+        C["tests<br/>owns tests/"]
+    end
+    Roles --> M[("Model API<br/>DeepSeek, OpenAI,<br/>OpenRouter, Ollama")]
+    Srv -. "summary: written, REJECTED, NOTES" .-> Lead
 ```
 
-Layers: **you → lead → role sub-agents → (optionally) a stronger model for retries.** The lead owns the contracts (the shared interfaces) and is the only reviewer; sub-agents never see each other's work except through files the lead passes as context. Full design in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+The lead owns the **contracts** (shared interfaces and types that no role may write) and is the only reviewer. Sub-agents never see each other's work except through files the lead passes as context. Full design in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+### One delegation, step by step
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant L as Lead (Claude)
+    participant S as ensemble-mcp
+    participant M as Model API
+    participant D as Disk
+    L->>S: delegate_task(role, task, context_files)
+    S->>S: system = shared rules + role prompt<br/>user = task + context files
+    S->>M: POST /chat/completions
+    M-->>S: "=== FILE: path === ... === END FILE ==="
+    loop each file block
+        S->>S: path policy check
+        alt inside the role's owned paths
+            S->>D: write file
+        else outside
+            S-->>L: REJECTED: path, reason
+        end
+    end
+    S-->>L: summary: written, rejected, warnings, NOTES
+    L->>D: review, build, test
+    Note over L: fix small issues, re-delegate larger ones
+```
+
+### Who may write where
+
+```mermaid
+flowchart LR
+    subgraph Lead_only ["Lead only"]
+        Core["core/<br/>contracts"]
+    end
+    subgraph Roles ["Role-owned"]
+        direction TB
+        R1["backend -> src/"]
+        R2["web -> web/"]
+        R3["tests -> tests/"]
+    end
+    subgraph Never ["Never writable"]
+        N[".env*, keys, .git/,<br/>.ensemble/, ensemble.json"]
+    end
+    R1 -. "rejected" .-> R2
+    R3 -. "rejected" .-> R1
+    R1 -. "rejected" .-> Core
+    R1 -. "rejected" .-> N
+```
 
 ## Quick start
 
@@ -62,6 +112,75 @@ or put this in the project's `.mcp.json`:
 Without installing, `"command": "python3", "args": ["-m", "ensemble_mcp", "--config", "...", "serve"]` with `PYTHONPATH=/path/to/ensemble-mcp/src` also works.
 
 Then copy [templates/CLAUDE.md](templates/CLAUDE.md) into your project so the lead knows the workflow, and ask Claude to build something.
+
+## Multi-level agent architectures
+
+Out of the box the server gives you **two levels**: a lead that delegates, and role sub-agents that implement. Because delegation is just an MCP tool plus a config file, you can stack more levels without changing the code. Three patterns, from simple to ambitious. (Patterns 2 and 3 compose existing pieces and have not been battle-tested; start with 1.)
+
+### 1. Model tiers: cheap first, strong on failure
+
+Put a cheap and a strong model in `provider.models`. The lead always starts on the default and only escalates a step that failed.
+
+```mermaid
+flowchart LR
+    T["Task"] --> C["Cheap model<br/>default_model"]
+    C --> R{"Lead review:<br/>builds and tests pass?"}
+    R -- yes --> Done(["Accept"])
+    R -- "no, sharper prompt" --> C
+    R -- "still failing" --> S["Strong model<br/>model: deepseek-reasoner"]
+    S --> R2{"Review"}
+    R2 -- yes --> Done
+    R2 -- no --> Lead["Lead fixes it directly"]
+```
+
+No extra setup: pass `"model": "<strong model>"` on the retry.
+
+### 2. Implementers and a reviewer
+
+Add a read-mostly **reviewer** role that can only write review notes. The lead passes it the files to inspect and reads its findings instead of reading every line itself. This adds a second sub-agent level (build, then audit) while the lead stays the final judge.
+
+```mermaid
+flowchart LR
+    Lead --> I["backend, web, tests<br/>(implementers)"]
+    I -- "files" --> Lead
+    Lead -- "changed files as context_files" --> Rv["reviewer<br/>owns reviews/"]
+    Rv -- "reviews/*.md" --> Lead
+    Lead -- "targeted fixes" --> I
+```
+
+```json
+"reviewer": {
+  "owns": ["reviews/"],
+  "instructions": "Review the files in the context. Write findings to reviews/<topic>.md: bugs, contract violations, missing tests. Do not propose rewrites of whole files.",
+  "description": "audits implementer output"
+}
+```
+
+Use a different (ideally stronger) `model` for the reviewer than the implementers, so it does not repeat their blind spots. The reviewer is advisory: treat its findings like any NOTES, verify before acting.
+
+### 3. Domain leads: one lead per area, one level above them
+
+For a large codebase, give each area its own `ensemble.json` and its own MCP server, and let a Claude Code **subagent** act as the lead of that area, with a top-level lead coordinating the areas.
+
+```mermaid
+flowchart TD
+    Top["Top lead (Claude Code)<br/>owns cross-area contracts"]
+    Top --> MobLead["Mobile lead<br/>Claude Code subagent"]
+    Top --> WebLead["Web lead<br/>Claude Code subagent"]
+    MobLead -- "MCP server: ensemble-mobile" --> MobR["roles: ui, storage, tests<br/>mobile/ensemble.json"]
+    WebLead -- "MCP server: ensemble-web" --> WebR["roles: api, frontend, tests<br/>web/ensemble.json"]
+```
+
+```bash
+claude mcp add ensemble-mobile -- ensemble-mcp -c /abs/path/mobile/ensemble.json serve
+claude mcp add ensemble-web    -- ensemble-mcp -c /abs/path/web/ensemble.json serve
+```
+
+Rules that keep this sane:
+- Cross-area contracts (API schemas, shared types) live in a directory only the **top** lead writes. Area leads and roles treat it as read-only.
+- Area `owns` paths must not overlap across configs; the servers do not coordinate with each other.
+- Each area lead reports a short summary upward (what changed, what it verified, open questions). The top lead should not re-read every file.
+- Add levels only when one lead's context can no longer hold the area. Every level adds latency, cost and a place for misunderstandings; many projects are best served by pattern 1 alone.
 
 ## Configuration
 
@@ -127,7 +246,23 @@ ensemble-mcp serve                       MCP server on stdio (the default)
 
 ## Safety
 
-Sub-agent output is untrusted text written to your disk. Ownership, symlink resolution, protected secrets and no code execution limit the blast radius; they do not replace review. Use git and read every diff. Details and what is *not* covered in [SECURITY.md](SECURITY.md). Everything you pass as context is sent to your model provider.
+Sub-agent output is untrusted text written to your disk. Every file block goes through this gate:
+
+```mermaid
+flowchart TD
+    F["File block from model"] --> A{"Relative path,<br/>no .. ?"}
+    A -- no --> X
+    A -- yes --> B{"Resolves inside<br/>project root?<br/>(symlinks followed)"}
+    B -- no --> X
+    B -- yes --> C{"Secret, .git, .ensemble<br/>or config file?"}
+    C -- yes --> X
+    C -- no --> D{"Spelled AND real path<br/>under the role's owns?"}
+    D -- no --> X
+    D -- yes --> W(["Write file"])
+    X(["REJECTED, reported to lead"])
+```
+
+Ownership, symlink resolution, protected secrets and no code execution limit the blast radius; they do not replace review. Use git and read every diff. Details and what is *not* covered in [SECURITY.md](SECURITY.md). Everything you pass as context is sent to your model provider.
 
 ## More docs
 
