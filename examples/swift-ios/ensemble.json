@@ -1,0 +1,31 @@
+{
+  "provider": {
+    "base_url": "https://api.deepseek.com",
+    "api_key_env": "DEEPSEEK_API_KEY",
+    "models": ["deepseek-chat", "deepseek-reasoner"],
+    "default_model": "deepseek-chat"
+  },
+  "shared_context": ["docs/CONVENTIONS.md"],
+  "roles": {
+    "ui": {
+      "owns": ["MyKit/Sources/MyKit/UI/", "App/"],
+      "instructions_file": "docs/agents/ui.md",
+      "description": "SwiftUI views and app shell"
+    },
+    "intelligence": {
+      "owns": ["MyKit/Sources/MyKit/Intelligence/"],
+      "instructions_file": "docs/agents/intelligence.md",
+      "description": "on-device recognition and embeddings"
+    },
+    "storage": {
+      "owns": ["MyKit/Sources/MyKit/Storage/"],
+      "instructions_file": "docs/agents/storage.md",
+      "description": "persistence and search"
+    },
+    "tests": {
+      "owns": ["MyKit/Tests/"],
+      "instructions_file": "docs/agents/tests.md",
+      "description": "Swift Testing tests"
+    }
+  }
+}

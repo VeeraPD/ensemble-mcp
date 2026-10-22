@@ -1,0 +1,14 @@
+{
+  "provider": {
+    "base_url": "https://api.deepseek.com",
+    "api_key_env": "DEEPSEEK_API_KEY",
+    "models": ["deepseek-chat", "deepseek-reasoner"],
+    "default_model": "deepseek-chat"
+  },
+  "shared_context": ["docs/CONVENTIONS.md"],
+  "roles": {
+    "api": {"owns": ["app/api/"], "instructions_file": "docs/agents/api.md", "description": "HTTP handlers"},
+    "db": {"owns": ["app/db/", "migrations/"], "instructions_file": "docs/agents/db.md", "description": "models and migrations"},
+    "tests": {"owns": ["tests/"], "instructions_file": "docs/agents/tests.md", "description": "pytest tests"}
+  }
+}
