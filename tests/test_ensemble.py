@@ -60,16 +60,12 @@ class Base(unittest.TestCase):
 
 
 class ParserTests(unittest.TestCase):
-    def test_files_fence_and_notes(self):
-        text = "=== FILE: a.py ===\n```python\nx = 1  # NOTES: inline\n```\n=== END FILE ===\nNOTES: hello"
-        files, notes = parse_reply(text)
-        self.assertEqual(files, [("a.py", "x = 1  # NOTES: inline")])
-        self.assertEqual(notes, "hello")
+    def test_files_and_fence(self):
+        text = "=== FILE: a.py ===\n```python\nx = 1\n```\n=== END FILE ==="
+        self.assertEqual(parse_reply(text), [("a.py", "x = 1")])
 
     def test_no_blocks(self):
-        files, notes = parse_reply("just chatter")
-        self.assertEqual(files, [])
-        self.assertEqual(notes, "")
+        self.assertEqual(parse_reply("just chatter"), [])
 
 
 class ConfigTests(Base):
@@ -148,12 +144,11 @@ class EndToEnd(Base):
 
     def test_writes_owned_rejects_others(self):
         FakeApi.reply = ("=== FILE: src/a.py ===\nprint(1)\n=== END FILE ===\n"
-                         "=== FILE: tests/t.py ===\nx\n=== END FILE ===\nNOTES: check this")
+                         "=== FILE: tests/t.py ===\nx\n=== END FILE ===")
         out = run_task(self.cfg, {"role": "backend", "task": "do it", "context_files": ["rules.md"]})
         self.assertTrue(os.path.exists(os.path.join(self.dir, "src", "a.py")))
         self.assertFalse(os.path.exists(os.path.join(self.dir, "tests", "t.py")))
         self.assertIn("REJECTED", out)
-        self.assertIn("NOTES: check this", out)
         seen = FakeApi.seen[0]
         self.assertEqual(seen["auth"], "Bearer test-key")
         self.assertEqual(seen["body"]["model"], "m-small")

@@ -74,7 +74,7 @@ def run_task(cfg, spec):
     t0 = time.time()
     text, finish, usage = client.chat(cfg, system, user, model)
 
-    files, notes = parse_reply(text)
+    files = parse_reply(text)
     written, rejected = [], []
     for rel_in, content in files:
         try:
@@ -101,6 +101,4 @@ def run_task(cfg, spec):
         lines.append("WARNING: reply hit the token limit; the last file may be missing or cut. Split the task.")
     if not files:
         lines.append("Raw reply (no file blocks found):\n" + text[:4000])
-    if notes:
-        lines.append("NOTES: " + notes)
     return "\n".join(lines)

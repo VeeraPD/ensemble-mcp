@@ -14,8 +14,7 @@ You (Claude) are the lead: you plan, write contracts, write task prompts, delega
 2. Write each task prompt self-contained: goal, exact file paths, API signatures, acceptance criteria. Pass contracts and related code as `context_files`.
 3. Run roles with disjoint paths via `delegate_parallel`; otherwise `delegate_task`.
 4. Review every returned file by reading it. Run [build and test command]. Fix small issues yourself; send a precise follow-up for larger ones. Use the stronger model only after the default fails.
-5. Never trust NOTES blindly. Resolve contract questions by changing the contracts and re-delegating.
-6. Treat REJECTED paths as a signal: the task or the role's `owns` is wrong.
+5. Treat REJECTED paths as a signal: the task or the role's `owns` is wrong. Fix the contracts or config and re-delegate.
 
 ## Rules
 - Do not commit or push unless asked. Never read or print .env.
