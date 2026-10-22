@@ -33,7 +33,7 @@ Layers: **you → lead → role sub-agents → (optionally) a stronger model for
 ## Quick start
 
 ```bash
-pip install git+https://github.com/<you>/ensemble-mcp      # or: pip install -e . from a clone
+pip install git+https://github.com/VeeraPD/ensemble-mcp      # or: pip install -e . from a clone
 cd your-project
 ensemble-mcp init                                          # writes ensemble.json + docs/CONVENTIONS.md
 export DEEPSEEK_API_KEY=sk-...                             # or put it in ./.env (git-ignored!)
